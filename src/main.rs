@@ -1,95 +1,28 @@
+mod mt_samples;
+
 use reqwest::{Client};
 use scraper::{Html, Selector};
 use anyhow::Result;
-//use scraper::node::Text;
 use tokio;
 use serde::{Serialize, Deserialize};
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::error::Error;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Header {
-    specialty: String,
-    name: String,
-    description: String,
-    text: String,
-    keywords: String,
-    url: String
-}
-
-
-async fn get_parsed_page(client: Client, url: String) -> Result<String> {
-
-    let response = client.get(url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .send()
-        .await?
-        .text()
-        .await?;
-
-    Ok(response)
-
-}
-
-async fn convert_to_header(data: Vec<String>) -> Result<Header> {
-
-    let header_data: Header = Header {
-        specialty: String::from(&data[1]),
-        name: String::from(&data[3]),
-        description: String::from(&data[5]),
-        text: String::from(""),
-        keywords: String::from(""),
-        url: String::from("")
-    };
-
-    Ok(header_data)
-
-}
-
-async fn append_as_ndjson(header: &Header, filename: &str) -> Result<(), Box<dyn Error>> {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(filename)?;
-
-    let json_string = serde_json::to_string(&header)?;
-    writeln!(file, "{}", json_string)?;
-
-    Ok(())
-}
-
-
-async fn get_node_content(sub_page: Html, selector: &Selector) -> Option<Vec<String>> {
-
-    let mut non_headers: Vec<String> = Vec::new();
-
-    if let Some(bold_select) = sub_page.select(selector).next() {
-        for node in bold_select.children() {
-            if let Some(text) = node.value().as_text() {
-                let cleaned = text.trim().to_string();
-                if !cleaned.is_empty() {
-                    non_headers.push(cleaned);
-                }
-            } else if let Some(element) = node.value().as_element() {
-                let text: String = node.descendants()
-                    .filter_map(|n| n.value().as_text())
-                    .map(|text| text.trim())
-                    .filter(|text| !text.is_empty())
-                    .collect();
-                if !text.is_empty() {
-                    non_headers.push(text);
-                }
-            }
-        }
-    }
-
-    Some(non_headers)
-}
-
+use std::fs::{create_dir_all};
+use std::path::{PathBuf};
+use mt_samples::{get_node_content, get_parsed_page, convert_to_header, Header, append_as_ndjson};
+use dirs::home_dir;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+
+    // set home directory
+    let home_dir = home_dir();
+
+    // Set out_output
+    let out_path: PathBuf = home_dir.unwrap().join("data").join("mtSamples");
+
+    // Create an output directory
+    create_dir_all(&out_path).expect("Failed to create directory");
 
     // Create a new HTTP client
     let client = Client::new();
@@ -161,7 +94,7 @@ async fn main() -> Result<()> {
                                 cur_header.keywords = String::from(non_header_clean.split("/").last().unwrap().trim());
                                 cur_header.url = String::from(cur_site);
 
-                                append_as_ndjson(&cur_header, "header_output.jsonl").await.expect("Failed to Add Header");
+                                append_as_ndjson(&cur_header, &out_path.join("header_output.jsonl")).await.expect("Failed to Add Header");
                             } else {
                                 println!("\nHeaders len: {}\n Current Link: {}", headers.len(), cur_site);
                             }
